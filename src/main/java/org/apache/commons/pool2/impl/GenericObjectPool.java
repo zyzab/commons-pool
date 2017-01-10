@@ -523,9 +523,11 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
      */
     @Override
     public void returnObject(final T obj) {
+        //从所有对象池中获取返回的对象
         final PooledObject<T> p = allObjects.get(new IdentityWrapper<T>(obj));
 
         if (p == null) {
+            //如果没有遗弃配置AbandonedConfig,抛出异常,有则直接返回
             if (!isAbandonedConfig()) {
                 throw new IllegalStateException(
                         "Returned object not currently part of this pool");
@@ -535,6 +537,7 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
 
         synchronized(p) {
             final PooledObjectState state = p.getState();
+            //判断对象状态是否是正在使用，如果不是抛出异常，是则修改对象状态为正在归还，防止被遗弃
             if (state != PooledObjectState.ALLOCATED) {
                 throw new IllegalStateException(
                         "Object has already been returned to this pool or is invalid");
@@ -545,13 +548,16 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
         final long activeTime = p.getActiveTimeMillis();
 
         if (getTestOnReturn()) {
+            //如果对象无效
             if (!factory.validateObject(p)) {
                 try {
+                    //销毁对象，在空闲队列，所有集合中剔除对象，并且更新销毁对象数量，创建对象数量
                     destroy(p);
                 } catch (final Exception e) {
                     swallowException(e);
                 }
                 try {
+                    //试图确保空闲池中存在有可用的实例
                     ensureIdle(1, false);
                 } catch (final Exception e) {
                     swallowException(e);
@@ -562,15 +568,18 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
         }
 
         try {
+            //钝化对象,下次之前可以再复用该对象，比如对象是StringBuffer，可以用setLength(0)清空
             factory.passivateObject(p);
         } catch (final Exception e1) {
             swallowException(e1);
             try {
+                //同上
                 destroy(p);
             } catch (final Exception e) {
                 swallowException(e);
             }
             try {
+                //同上
                 ensureIdle(1, false);
             } catch (final Exception e) {
                 swallowException(e);
@@ -579,12 +588,14 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
             return;
         }
 
+        //释放资源
         if (!p.deallocate()) {
             throw new IllegalStateException(
                     "Object has already been returned to this pool or is invalid");
         }
 
         final int maxIdleSave = getMaxIdle();
+        //空闲队列是否已经等于配置的最多空闲数量，如果是则销毁对象，不是则归还到空闲队列中
         if (isClosed() || maxIdleSave > -1 && maxIdleSave <= idleObjects.size()) {
             try {
                 destroy(p);
@@ -592,6 +603,7 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
                 swallowException(e);
             }
         } else {
+            //如果配置的是先进先出，后进后出归还到空闲队列中
             if (getLifo()) {
                 idleObjects.addFirst(p);
             } else {
